@@ -62,6 +62,14 @@
     .brand { cursor: pointer; -webkit-tap-highlight-color: transparent; }
     .brand:focus-visible { border-radius: 6px; }
     .brand h1 { margin: 0; font-size: 30px; font-weight: 800; letter-spacing: .2px; }
+    /* Logo: shown only once logo.png has loaded; otherwise the text name stays */
+    .logo-badge, .logo-img { display: none; }
+    body.has-logo .logo-badge { display: inline-flex; align-items: center; justify-content: center; padding: 0; height: 46px; flex: none; }
+    body.has-logo .logo-badge .logo-img { display: block; height: 100%; width: auto; }
+    body.has-logo .brand { display: flex; align-items: center; gap: 14px; min-width: 0; }
+    body.has-logo .brand h1 { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+    body.has-logo .footer-brand > span { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+    body.has-logo .footer-logo { display: block; height: 64px; width: auto; margin: 0 0 4px -6px; }
     .brand p { margin: 0; font-size: 14px; color: var(--muted); }
     .header-search { position: relative; width: 100%; max-width: 640px; margin: 0 auto; }
     .header-search svg { position: absolute; left: 15px; top: 50%; transform: translateY(-50%); width: 19px; height: 19px; color: var(--muted); pointer-events: none; }
@@ -309,6 +317,7 @@
       .brand { grid-area: brand; }
       .brand h1 { font-size: 22px; white-space: nowrap; }
       .brand p { display: none; }
+      body.has-logo .logo-badge { height: 40px; }
       .header-buttons { grid-area: buttons; }
       .header-search { grid-area: search; max-width: none; }
       .header-btn { padding: 7px 10px; font-size: 15px; max-width: 112px; }
@@ -391,8 +400,11 @@
   <header class="header" id="siteHeader">
     <div class="header-inner">
       <div class="brand" id="homeLink" role="link" tabindex="0" aria-label="Go to the home page">
-        <h1 id="storeTitle">HumMartUS</h1>
-        <p>Grocery delivered to your door</p>
+        <span class="logo-badge"><img class="logo-img" src="logo-red.png" alt="" width="639" height="399" decoding="async"></span>
+        <div class="brand-words">
+          <h1 id="storeTitle">HumMartUS</h1>
+          <p>Grocery delivered to your door</p>
+        </div>
       </div>
       <div class="header-search">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg>
@@ -621,7 +633,7 @@
   <footer class="site-footer">
     <div class="footer-inner">
       <div>
-        <div class="footer-brand" id="ftBrand">HumMartUS</div>
+        <div class="footer-brand"><img class="logo-img footer-logo" src="logo.png" alt="" width="639" height="399" decoding="async"><span id="ftBrand">HumMartUS</span></div>
         <p>Grocery delivered to your door.</p>
       </div>
       <div>
@@ -829,6 +841,13 @@
     renderAccountButton();
     if (!$('pOrder').hidden) updateCheckout();
   }
+
+  // Show the logo only if logo.png loads; otherwise the text name remains
+  (function () {
+    const probe = new Image();
+    probe.onload = function () { document.body.classList.add('has-logo'); };
+    probe.src = 'logo-red.png';
+  })();
 
   function applyConfig() {
     document.title = config.storeName;
