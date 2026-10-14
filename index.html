@@ -140,6 +140,8 @@
     }
     .category-btn:hover { background: var(--mist); }
     .category-btn.active { background: #FDF0CC; border-left-color: var(--gold); font-weight: 700; }
+    .category-sidebar.searching .category-btn.active { background: none; border-left-color: transparent; font-weight: 400; }
+    .category-sidebar.searching .category-btn.category-sale.active { font-weight: 700; }
     .content { min-width: 0; }
 
     .products { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 18px; }
@@ -663,7 +665,7 @@
    When this page is hosted on GitHub Pages it talks to your Apps Script
    back end over the web. Paste your web app link (ends in /exec) below.
    (When the page is opened from Apps Script itself, this is skipped.)
-   PASTE_YOUR_APPS_SCRIPT_EXEC_LINK_HERE
+   API_URL = PASTE_YOUR_APPS_SCRIPT_EXEC_LINK_HERE
    --------------------------------------------------------------------- */
 (function () {
   var API_URL = 'https://script.google.com/macros/s/AKfycbySZ-K6k7FB_qPJLtCVJviylv9aAses3-sKCHLfiNBUQm1DNf557KUZ-CnjaVdb2o__yQ/exec';
@@ -957,10 +959,14 @@
         p.name.toLowerCase().includes(text) ||
         (p.brand || '').toLowerCase().includes(text) ||
         (p.category || '').toLowerCase().includes(text);
-      const matchCat = selectedCategory === 'All' ||
+      // Searching always looks at every product; the chosen category only applies when the box is empty
+      const matchCat = !!text || selectedCategory === 'All' ||
         (selectedCategory === SALE_KEY ? onSale(p) : p.category === selectedCategory);
       return matchText && matchCat;
     });
+    // While searching, show that all products are being searched (the category comes back when the box is cleared)
+    $('categorySidebar').classList.toggle('searching', !!text);
+    $('menuCurrent').textContent = text ? 'All' : (selectedCategory === SALE_KEY ? 'Sale items' : selectedCategory);
     displayProducts(list);
   }
 
