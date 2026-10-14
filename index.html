@@ -17,7 +17,8 @@
       --green-2: #D01F2B;   /* hover */
       --gold:    #F4A300;   /* marigold: Add to Cart, highlights */
       --gold-2:  #DB9200;   /* hover */
-      --chili:   #1C1B1B;   /* sale badge (dark, so it stands out on red) */
+      --chili:   #1C1B1B;   /* dark red-black for errors and out-of-stock text */
+      --sale:    #1B7F36;   /* sale badge and Sale filter (green) */
       --ink:     #231F20;   /* main text */
       --muted:   #6A6361;   /* secondary text */
       --line:    #E8E2E0;   /* borders */
@@ -151,7 +152,8 @@
     .product-img { display: block; width: 100%; aspect-ratio: 1 / 1; object-fit: contain; }
     .product-img.placeholder { display: flex; align-items: center; justify-content: center; font-size: 44px; color: #b9c4be; }
     .badge { position: absolute; top: 8px; left: 8px; padding: 2px 10px; border-radius: 999px; font-size: 14px; font-weight: 700; }
-    .badge-sale { background: var(--chili); color: #fff; }
+    .badge-sale { background: var(--sale); color: #fff; }
+    .category-btn.category-sale { color: var(--sale); font-weight: 700; }
     .badge-out { background: rgba(35, 31, 32, .88); color: #fff; }
     .product h3 { margin: 0 0 4px; font-size: 17px; font-weight: 600; line-height: 1.25; }
     .brand-line, .size-line { color: var(--muted); font-size: 15px; }
@@ -661,6 +663,7 @@
    When this page is hosted on GitHub Pages it talks to your Apps Script
    back end over the web. Paste your web app link (ends in /exec) below.
    (When the page is opened from Apps Script itself, this is skipped.)
+   PASTE_YOUR_APPS_SCRIPT_EXEC_LINK_HERE
    --------------------------------------------------------------------- */
 (function () {
   var API_URL = 'https://script.google.com/macros/s/AKfycbySZ-K6k7FB_qPJLtCVJviylv9aAses3-sKCHLfiNBUQm1DNf557KUZ-CnjaVdb2o__yQ/exec';
@@ -909,24 +912,33 @@
   /* ===========================================================
      CATEGORIES / SEARCH
      =========================================================== */
+  const SALE_KEY = '__sale__';   // built-in Sale filter; not a category in the sheet
+
   function createCategories() {
     const box = $('categories');
     clear(box);
-    const cats = ['All'].concat(Array.from(new Set(products.map(p => p.category).filter(Boolean))));
-    if (cats.indexOf(selectedCategory) === -1) selectedCategory = 'All';
+    const saleCount = products.filter(onSale).length;
+    const cats = [{ key: 'All', label: 'All' }];
+    if (saleCount > 0) cats.push({ key: SALE_KEY, label: 'Sale items (' + saleCount + ')', short: 'Sale items' });
+    Array.from(new Set(products.map(p => p.category).filter(Boolean)))
+      .forEach(c => cats.push({ key: c, label: c }));
+    if (!cats.some(c => c.key === selectedCategory)) selectedCategory = 'All';
     cats.forEach(cat => {
-      const b = el('button', 'category-btn' + (cat === selectedCategory ? ' active' : ''), cat);
+      const isSale = cat.key === SALE_KEY;
+      const b = el('button', 'category-btn' + (isSale ? ' category-sale' : '') + (cat.key === selectedCategory ? ' active' : ''), cat.label);
       b.type = 'button';
       b.addEventListener('click', () => {
-        selectedCategory = cat;
+        selectedCategory = cat.key;
         box.querySelectorAll('.category-btn').forEach(x => x.classList.remove('active'));
         b.classList.add('active');
-        $('menuCurrent').textContent = cat;
+        $('menuCurrent').textContent = cat.short || cat.label;
         setMenuOpen(false);
         filterProducts();
       });
       box.appendChild(b);
     });
+    const cur = cats.filter(c => c.key === selectedCategory)[0];
+    if ($('menuCurrent')) $('menuCurrent').textContent = cur.short || cur.label;
   }
 
   function setMenuOpen(open) {
@@ -942,7 +954,8 @@
         p.name.toLowerCase().includes(text) ||
         (p.brand || '').toLowerCase().includes(text) ||
         (p.category || '').toLowerCase().includes(text);
-      const matchCat = selectedCategory === 'All' || p.category === selectedCategory;
+      const matchCat = selectedCategory === 'All' ||
+        (selectedCategory === SALE_KEY ? onSale(p) : p.category === selectedCategory);
       return matchText && matchCat;
     });
     displayProducts(list);
