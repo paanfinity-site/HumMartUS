@@ -774,8 +774,11 @@
     if (!url) return '';
     const m = url.match(/drive\.google\.com\/file\/d\/([\w-]+)/) ||
               url.match(/drive\.google\.com\/(?:open|uc)\?(?:[^#]*&)?id=([\w-]+)/);
-    if (m) return 'https://drive.google.com/thumbnail?id=' + m[1] + '&sz=w600';
-    return /^https?:\/\//i.test(url) ? url : '';
+    if (m) return 'https://drive.google.com/thumbnail?id=' + m[1] + '&sz=w400';
+    if (/^https?:\/\//i.test(url)) return url;
+    // A file kept in this site's own images folder, e.g. images/rice.jpg
+    if (/^[\w\-. \/]+\.(?:jpe?g|png|webp|gif|avif)$/i.test(url) && url.indexOf('..') === -1) return encodeURI(url.replace(/^\/+/, ''));
+    return '';
   }
 
   /* ===========================================================
@@ -984,6 +987,7 @@
       img.className = 'product-img';
       img.alt = p.name;
       img.loading = 'lazy';
+      img.decoding = 'async';
       img.referrerPolicy = 'no-referrer';
       img.addEventListener('error', () => img.replaceWith(el('div', 'product-img placeholder', '🛒')));
       img.src = src;
