@@ -53,6 +53,9 @@
 
     /* ===== ANNOUNCEMENT BAR ===== */
     .promo { background: var(--green); color: #fff; text-align: center; padding: 8px 16px; font-size: 15px; font-weight: 600; }
+    .promo-tiers { display: block; margin-top: 2px; font-size: 14px; font-weight: 500; color: #FBDADB; }
+    .promo-tiers span { display: inline-block; white-space: nowrap; margin: 0 6px; }
+    .promo-tiers span + span::before { content: '·'; margin-right: 12px; color: #F2B8BB; }
 
     /* ===== HEADER ===== */
     .header { background: var(--paper); border-bottom: 1px solid var(--line); position: sticky; top: 0; z-index: 60; }
@@ -157,7 +160,19 @@
     .badge-sale { background: var(--sale); color: #fff; }
     .category-btn.category-sale { color: var(--sale); font-weight: 700; }
     .badge-out { background: rgba(35, 31, 32, .88); color: #fff; }
-    .product h3 { margin: 0 0 4px; font-size: 17px; font-weight: 600; line-height: 1.25; }
+    /* Page controls under the product grid */
+    .pager { display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: 8px; margin: 22px 0 6px; }
+    .pager-info { flex-basis: 100%; text-align: center; color: var(--muted); font-size: 15px; margin-bottom: 2px; }
+    .pager button, .pager select {
+      min-width: 44px; height: 44px; padding: 0 12px; border: 1px solid var(--line); border-radius: 10px;
+      background: var(--paper); color: var(--ink); font-size: 16px; font-weight: 600; cursor: pointer;
+    }
+    .pager button:hover:not(:disabled) { border-color: var(--green); }
+    .pager button.current { background: var(--green); border-color: var(--green); color: #fff; }
+    .pager button:disabled { opacity: .45; cursor: default; }
+    .pager .gap { color: var(--muted); padding: 0 2px; }
+    .pager .pager-select { display: none; }
+    .product h3 { margin: 0 0 4px; font-size: 17px; font-weight: 600; line-height: 1.25; overflow-wrap: anywhere; }
     .brand-line, .size-line { color: var(--muted); font-size: 15px; }
     .size-line { margin: 2px 0; }
     .product-desc {
@@ -174,6 +189,7 @@
       margin-top: auto; width: 100%; padding: 11px; border: none; border-radius: var(--r-ctl);
       background: var(--gold); color: var(--ink); cursor: pointer; font-weight: 700; font-size: 16px;
     }
+    button.add { margin-top: auto; }
     button.add:hover { background: var(--gold-2); }
     button.add:disabled { background: #D5DBD8; color: #7a867f; cursor: not-allowed; }
     .loading, .load-error { text-align: center; padding: 40px; grid-column: 1 / -1; color: var(--muted); }
@@ -314,6 +330,11 @@
     /* ===== PHONES ===== */
     @media (max-width: 700px) {
       .promo { font-size: 14px; padding: 7px 12px; }
+      .promo-tiers { font-size: 14px; line-height: 1.35; }
+      .promo-tiers span { display: block; margin: 0; }
+      .promo-tiers span + span::before { content: none; }
+      .pager .pager-num, .pager .gap { display: none; }
+      .pager .pager-select { display: inline-block; }
       .header-inner {
         padding: 10px 12px; gap: 10px 12px; grid-template-columns: minmax(0, 1fr) auto;
         grid-template-areas: "brand buttons" "search search";
@@ -363,7 +384,7 @@
       .badge { top: 5px; left: 5px; padding: 2px 8px; font-size: 12px; }
       .product h3 {
         font-size: 15px; font-weight: 700; line-height: 1.22; margin: 0 0 3px; letter-spacing: -0.01em;
-        display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+        overflow-wrap: anywhere; hyphens: auto;
       }
       .brand-line, .product-desc { display: none; }
       .size-line { font-size: 14px; margin: 0 0 2px; }
@@ -399,7 +420,7 @@
 <body>
 
   <!-- ===== HEADER ===== -->
-  <div class="promo" id="promo" hidden><span id="promoFree"></span></div>
+  <div class="promo" id="promo" hidden><span id="promoFree"></span><span class="promo-tiers" id="promoTiers"></span></div>
 
   <header class="header" id="siteHeader">
     <div class="header-inner">
@@ -631,6 +652,7 @@
       <div id="products" class="products">
         <div class="loading">Loading products...</div>
       </div>
+      <nav id="pager" class="pager" aria-label="Product pages" hidden></nav>
     </div>
   </main>
 
@@ -797,7 +819,10 @@
   function feeCents(subtotalCents) {
     if (subtotalCents >= Math.round(config.freeDeliveryMin * 100)) return 0;
     if (subtotalCents >= Math.round(config.midFeeMin * 100)) return Math.round(config.midFee * 100);
-    return Math.round(config.lowFee * 100);
+    // Older server without the extra tier: keep its two-step fees
+    if (config.lowFeeMin == null || config.tinyFee == null) return Math.round(config.lowFee * 100);
+    if (subtotalCents >= Math.round(config.lowFeeMin * 100)) return Math.round(config.lowFee * 100);
+    return Math.round(config.tinyFee * 100);
   }
 
   function computeTotals() {
@@ -850,6 +875,21 @@
     if (!$('pOrder').hidden) updateCheckout();
   }
 
+  /** Paid delivery steps from the server settings, highest order range first. */
+  function feeTiers() {
+    const cent = n => (Math.round(n * 100) / 100);
+    const top = cent(config.freeDeliveryMin - 0.01).toFixed(2);
+    const out = [];
+    out.push({ range: money(config.midFeeMin) + ' to $' + top, fee: money(config.midFee) });
+    if (config.lowFeeMin == null || config.tinyFee == null) {
+      out.push({ range: 'under ' + money(config.midFeeMin), fee: money(config.lowFee) });
+    } else {
+      out.push({ range: money(config.lowFeeMin) + ' to $' + cent(config.midFeeMin - 0.01).toFixed(2), fee: money(config.lowFee) });
+      out.push({ range: 'under ' + money(config.lowFeeMin), fee: money(config.tinyFee) });
+    }
+    return out;
+  }
+
   // Show the logo only if logo.png loads; otherwise the text name remains
   (function () {
     const probe = new Image();
@@ -863,6 +903,11 @@
 
     const free = money(config.freeDeliveryMin);
     $('promoFree').textContent = 'Free delivery on orders over ' + free;
+    const tiers = feeTiers();
+    const promoTiers = $('promoTiers');
+    clear(promoTiers);
+    tiers.forEach(t => promoTiers.appendChild(el('span', null, 'Orders ' + t.range + ': ' + t.fee)));
+    promoTiers.appendChild(el('span', null, 'No minimum order'));
     $('tFree').textContent = 'On orders over ' + free;
     $('promo').hidden = false;
 
@@ -878,22 +923,17 @@
     $('ftCities').textContent = 'We deliver to ' + config.deliveryCities.join(', ') + '.';
     const fees = $('ftFees');
     clear(fees);
-    [
-      'Orders over ' + free + ': free',
-      'Orders ' + money(config.midFeeMin) + ' to $' + (config.freeDeliveryMin - 0.01).toFixed(2) + ': ' + money(config.midFee),
-      'Orders under ' + money(config.midFeeMin) + ': ' + money(config.lowFee),
-      'No minimum order'
-    ].forEach(t => fees.appendChild(el('li', null, t)));
+    ['Orders over ' + free + ': free']
+      .concat(feeTiers().map(t => 'Orders ' + t.range + ': ' + t.fee))
+      .concat(['No minimum order'])
+      .forEach(t => fees.appendChild(el('li', null, t)));
     $('ftWa').href = 'https://wa.me/' + config.whatsappNumber;
 
-    const upper = (config.freeDeliveryMin - 0.01).toFixed(2);
     const rules = $('deliveryRules');
     clear(rules);
-    [
-      ['Orders ' + money(config.freeDeliveryMin) + '+ → ', 'FREE'],
-      ['Orders ' + money(config.midFeeMin) + '–$' + upper + ' → ', money(config.midFee)],
-      ['Orders below ' + money(config.midFeeMin) + ' → ', money(config.lowFee)]
-    ].forEach(r => {
+    [['Orders over ' + money(config.freeDeliveryMin) + ': ', 'FREE']]
+      .concat(feeTiers().map(t => ['Orders ' + t.range + ': ', t.fee]))
+      .forEach(r => {
       rules.appendChild(document.createTextNode(r[0]));
       rules.appendChild(el('strong', null, r[1]));
       rules.appendChild(document.createElement('br'));
@@ -964,6 +1004,9 @@
         (selectedCategory === SALE_KEY ? onSale(p) : p.category === selectedCategory);
       return matchText && matchCat;
     });
+    // Back to page 1 whenever the search or category changes; keep the page when only the list is refreshed
+    const viewKey = text + '|' + (text ? '' : selectedCategory);
+    if (viewKey !== lastViewKey) { currentPage = 1; lastViewKey = viewKey; }
     // While searching, show that all products are being searched (the category comes back when the box is cleared)
     $('categorySidebar').classList.toggle('searching', !!text);
     $('menuCurrent').textContent = text ? 'All' : (selectedCategory === SALE_KEY ? 'Sale items' : selectedCategory);
@@ -973,14 +1016,75 @@
   /* ===========================================================
      PRODUCTS
      =========================================================== */
+  const PAGE_SIZE = 30;          // products per page (30 fills whole rows of 3, 5 or 6)
+  let currentPage = 1, lastViewKey = '', shownList = [];
+
   function displayProducts(list) {
+    shownList = list;
     const box = $('products');
     clear(box);
     if (!list.length) {
       box.appendChild(el('div', 'loading', 'No products found.'));
+      renderPager();
       return;
     }
-    list.forEach(p => box.appendChild(buildCard(p)));
+    const pages = Math.ceil(list.length / PAGE_SIZE);
+    if (currentPage > pages) currentPage = pages;
+    list.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE)
+      .forEach(p => box.appendChild(buildCard(p)));
+    renderPager();
+  }
+
+  function goToPage(n) {
+    currentPage = n;
+    displayProducts(shownList);
+    const top = document.querySelector('.main-layout');
+    if (top) top.scrollIntoView({ block: 'start' });
+  }
+
+  function renderPager() {
+    const nav = $('pager');
+    clear(nav);
+    const pages = Math.ceil(shownList.length / PAGE_SIZE);
+    if (pages <= 1) { nav.hidden = true; return; }
+    nav.hidden = false;
+    const from = (currentPage - 1) * PAGE_SIZE + 1;
+    const to = Math.min(currentPage * PAGE_SIZE, shownList.length);
+    nav.appendChild(el('div', 'pager-info', 'Showing ' + from + '–' + to + ' of ' + shownList.length.toLocaleString('en-US') + ' products'));
+
+    const btn = (label, page, cls, disabled, aria) => {
+      const b = el('button', cls || '', label);
+      b.type = 'button';
+      if (aria) b.setAttribute('aria-label', aria);
+      if (disabled) b.disabled = true; else b.addEventListener('click', () => goToPage(page));
+      return b;
+    };
+    nav.appendChild(btn('‹ Prev', currentPage - 1, 'pager-prev', currentPage === 1, 'Previous page'));
+
+    // Phones: one page picker instead of a row of numbers
+    const sel = el('select', 'pager-select');
+    sel.setAttribute('aria-label', 'Go to page');
+    for (let i = 1; i <= pages; i++) {
+      const o = el('option', null, 'Page ' + i + ' of ' + pages);
+      o.value = String(i);
+      if (i === currentPage) o.selected = true;
+      sel.appendChild(o);
+    }
+    sel.addEventListener('change', () => goToPage(Number(sel.value)));
+    nav.appendChild(sel);
+
+    // Larger screens: first, last and the pages around the current one
+    const want = new Set([1, pages, currentPage - 1, currentPage, currentPage + 1]);
+    let last = 0;
+    Array.from(want).filter(n => n >= 1 && n <= pages).sort((a, b) => a - b).forEach(n => {
+      if (n - last > 1) nav.appendChild(el('span', 'gap', '…'));
+      const b = btn(String(n), n, 'pager-num' + (n === currentPage ? ' current' : ''), false, 'Page ' + n);
+      if (n === currentPage) b.setAttribute('aria-current', 'page');
+      nav.appendChild(b);
+      last = n;
+    });
+
+    nav.appendChild(btn('Next ›', currentPage + 1, 'pager-next', currentPage === pages, 'Next page'));
   }
 
   function buildCard(p) {
