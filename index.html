@@ -607,6 +607,7 @@
             <h3>Order Summary</h3>
             <div id="checkoutItems"></div>
             <div class="summary-row"><span>Subtotal</span><span id="checkoutSubtotal">$0.00</span></div>
+            <div id="checkoutTaxes"></div>
             <div class="summary-row"><span>Delivery</span><span id="checkoutDelivery">$0.00</span></div>
             <div class="summary-row summary-total"><span>Total</span><span id="checkoutTotal">$0.00</span></div>
           </div>
@@ -825,14 +826,32 @@
     return Math.round(config.tinyFee * 100);
   }
 
+  // Tax classes come from the "Tax Rates" sheet via the server: config.taxes = [{n, label, rate}].
+  // Only classes that have a rate are listed, so a missing Tax 2 / Tax 3 simply never appears.
+  const taxClasses = () => (config && Array.isArray(config.taxes)) ? config.taxes : [];
+  function taxLabel(t) { return t.label + ' (' + (Number(t.rate) || 0) + '%)'; }
+
   function computeTotals() {
     let cents = 0;
+    const base = { 1: 0, 2: 0, 3: 0 };
     Object.keys(cart).forEach(sku => {
       const p = productsBySku[sku];
-      if (p) cents += Math.round(unitPrice(p) * 100) * cart[sku];
+      if (!p) return;
+      const line = Math.round(unitPrice(p) * 100) * cart[sku];
+      cents += line;
+      [1, 2, 3].forEach(n => { if (p['tax' + n]) base[n] += line; });
     });
     const fee = config ? feeCents(cents) : 0;
-    return { subtotalCents: cents, subtotal: cents / 100, fee: fee / 100, total: (cents + fee) / 100 };
+    // Tax is worked out on the item amounts only (never on the delivery fee), rounded to the cent per class.
+    const taxes = [];
+    let taxCents = 0;
+    taxClasses().forEach(t => {
+      const c = Math.round(base[t.n] * (Number(t.rate) || 0) / 100);
+      taxCents += c;
+      if (c > 0) taxes.push({ n: t.n, label: taxLabel(t), amount: c / 100 });
+    });
+    return { subtotalCents: cents, subtotal: cents / 100, taxes: taxes, fee: fee / 100,
+             total: (cents + taxCents + fee) / 100 };
   }
 
   /* ===========================================================
@@ -1525,10 +1544,16 @@
         'Deliver to: ' + [o.address, o.city, config ? config.state : '', o.zip].filter(Boolean).join(', ')));
 
       const totals = el('div', 'order-card-totals');
-      [['Subtotal', money(o.subtotal)],
-       ['Delivery', o.deliveryFee === 0 ? 'FREE' : money(o.deliveryFee)],
-       ['Total', money(o.total)]].forEach((r, i) => {
-        const row = el('div', 'summary-row' + (i === 2 ? ' grand' : ''));
+      const rows = [['Subtotal', money(o.subtotal)]];
+      [1, 2, 3].forEach(n => {
+        if (!(o['tax' + n] > 0)) return;
+        const t = taxClasses().filter(x => x.n === n)[0];
+        rows.push([t ? taxLabel(t) : 'Tax ' + n, money(o['tax' + n])]);
+      });
+      rows.push(['Delivery', o.deliveryFee === 0 ? 'FREE' : money(o.deliveryFee)]);
+      rows.push(['Total', money(o.total)]);
+      rows.forEach((r, i) => {
+        const row = el('div', 'summary-row' + (i === rows.length - 1 ? ' grand' : ''));
         row.appendChild(el('span', null, r[0]));
         row.appendChild(el('span', null, r[1]));
         totals.appendChild(row);
@@ -1678,6 +1703,14 @@
 
     const t = computeTotals();
     $('checkoutSubtotal').textContent = money(t.subtotal);
+    const taxBox = $('checkoutTaxes');
+    taxBox.textContent = '';
+    t.taxes.forEach(x => {
+      const r = el('div', 'summary-row');
+      r.appendChild(el('span', null, x.label));
+      r.appendChild(el('span', null, money(x.amount)));
+      taxBox.appendChild(r);
+    });
     const d = $('checkoutDelivery');
     if (t.fee === 0) { d.textContent = 'FREE'; d.className = 'free'; }
     else { d.textContent = money(t.fee); d.className = ''; }
@@ -1741,6 +1774,7 @@
     if (d.deliveryNotes) m += 'Notes: ' + d.deliveryNotes + '\n';
     m += '\nITEMS\n' + order.items + '\n\n';
     m += 'Subtotal: ' + money(order.subtotal) + '\n';
+    (order.taxes || []).forEach(x => { m += x.label + ' (' + x.rate + '%): ' + money(x.amount) + '\n'; });
     m += 'Delivery: ' + (order.deliveryFee === 0 ? 'FREE' : money(order.deliveryFee)) + '\n';
     m += 'TOTAL: ' + money(order.total);
     return m;
