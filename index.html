@@ -688,9 +688,10 @@
    When this page is hosted on GitHub Pages it talks to your Apps Script
    back end over the web. Paste your web app link (ends in /exec) below.
    (When the page is opened from Apps Script itself, this is skipped.)
+   API_URL = PASTE_YOUR_APPS_SCRIPT_EXEC_LINK_HERE.
    --------------------------------------------------------------------- */
 (function () {
-  var API_URL = 'PASTE_YOUR_APPS_SCRIPT_EXEC_LINK_HERE';
+  var API_URL = 'https://script.google.com/macros/s/AKfycbySZ-K6k7FB_qPJLtCVJviylv9aAses3-sKCHLfiNBUQm1DNf557KUZ-CnjaVdb2o__yQ/exec';
   if (window.google && window.google.script && window.google.script.run) return;
 
   function call(name, args, ok, fail) {
