@@ -694,7 +694,14 @@
   var API_URL = 'https://script.google.com/macros/s/AKfycbySZ-K6k7FB_qPJLtCVJviylv9aAses3-sKCHLfiNBUQm1DNf557KUZ-CnjaVdb2o__yQ/exec';
   if (window.google && window.google.script && window.google.script.run) return;
 
-  function call(name, args, ok, fail) {
+  // Reading data is safe to repeat. Google sometimes answers a request with an error page for a few seconds
+  // (busy, waking up, a limit); the browser reports that as a "CORS" or network error. So read-only requests
+  // are quietly retried. Placing an order or changing an account is NEVER retried, so nothing can happen twice.
+  const SAFE_TO_RETRY = { getShopData: 1, getMyOrders: 1 };
+  const RETRY_WAITS = [1200, 3000, 6000];
+
+  function call(name, args, ok, fail, attempt) {
+    attempt = attempt || 0;
     fetch(API_URL, {
       method: 'POST',
       // text/plain keeps this a "simple" request, so the browser needs no extra permission check
@@ -703,8 +710,12 @@
       redirect: 'follow'
     })
       .then(function (r) { return r.json(); })
-      .then(function (j) { return j; }, function () { return { ok: false, error: 'Could not reach the server. Check your connection and try again.' }; })
+      .then(function (j) { return j; }, function () { return { ok: false, network: true, error: 'Could not reach the server. Check your connection and try again.' }; })
       .then(function (j) {
+        if (j && j.network && SAFE_TO_RETRY[name] && attempt < RETRY_WAITS.length) {
+          setTimeout(function () { call(name, args, ok, fail, attempt + 1); }, RETRY_WAITS[attempt]);
+          return;
+        }
         if (j && j.ok) { if (ok) ok(j.result); }
         else if (fail) fail(new Error((j && j.error) || 'Something went wrong. Please try again.'));
       });
