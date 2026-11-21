@@ -778,6 +778,7 @@
 
   const CART_KEY = 'ld_cart';
   const USER_KEY = 'ld_user';
+  const SAVED_CART_PREFIX = 'ld_cart_';   // + account ID: a customer's cart kept on this device while they are logged out
   const PENDING_KEY = 'ld_pending';   // the order being paid on Stripe, kept so the receipt can be shown on return
 
   /* ===========================================================
@@ -1528,6 +1529,23 @@
     user = { accountId: u.accountId, name: u.name, phone: u.phone, email: u.email, token: u.token };
     storeSet(USER_KEY, user);
     renderAccountButton();
+    restoreSavedCart();
+  }
+
+  /** Puts back the cart this customer had when they last logged out on this device (added to anything already in the cart). */
+  function restoreSavedCart() {
+    if (!user || !user.accountId) return;
+    const key = SAVED_CART_PREFIX + user.accountId;
+    const saved = storeGet(key);
+    if (!saved || typeof saved !== 'object') return;
+    Object.keys(saved).forEach(sku => {
+      const q = Math.floor(Number(saved[sku]));
+      if (q >= 1 && q <= 99) cart[sku] = Math.min(99, (cart[sku] || 0) + q);
+    });
+    storeRemove(key);
+    saveCart();
+    sanitizeCart();   // drops items that are gone or out of stock, and trims quantities to current stock
+    updateCart();
   }
 
   /** Clears the checkout form (a radio reset would otherwise re-select a hidden payment option). */
@@ -1537,6 +1555,11 @@
   }
 
   function logout() {
+    // Keep this customer's cart for their next login on this device (an empty cart clears any older saved one)
+    if (user && user.accountId) {
+      if (hasCart()) storeSet(SAVED_CART_PREFIX + user.accountId, cart);
+      else storeRemove(SAVED_CART_PREFIX + user.accountId);
+    }
     user = null;
     storeRemove(USER_KEY);
     // The next person on this device must not see this customer's cart or details
