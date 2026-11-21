@@ -104,6 +104,9 @@
     }
     .form-group label.check-row { display: flex; flex-direction: row; gap: 10px; align-items: flex-start; justify-content: flex-start; text-align: left; font-weight: 500; cursor: pointer; }
     .form-group label.check-row input { width: 20px; min-width: 20px; height: 20px; margin: 2px 0 0; padding: 0; flex: none; }
+    .form-group label.pay-option { border: 1px solid var(--line); border-radius: var(--r-ctl); padding: 12px; margin-top: 8px; background: var(--paper); }
+    .form-group label.pay-option:has(input:checked) { border-color: var(--green); box-shadow: 0 0 0 1px var(--green); }
+    .pay-option small { display: block; color: var(--muted); font-weight: 500; font-size: 15px; line-height: 1.4; margin-top: 2px; }
     .hero-cta:hover { background: var(--gold-2); }
     .hero-deliver { margin: 0 0 6px; font-weight: 600; color: #FBDADB; font-size: 15px; }
     .town-chips { display: flex; flex-wrap: wrap; gap: 6px; margin: 0; padding: 0; list-style: none; }
@@ -294,6 +297,17 @@
     .order-success { text-align: center; padding: 15px 0; }
     .order-number { font-family: var(--display); font-size: 32px; font-weight: 800; margin: 10px 0; }
     .success-note { color: var(--muted); line-height: 1.5; }
+    .pay-box { text-align: left; background: var(--mist); border-radius: 12px; padding: 16px; margin: 16px 0 0; line-height: 1.6; }
+    .pay-box h3 { margin: 0 0 6px; font-size: 18px; }
+    .pay-box p { margin: 6px 0 0; }
+    .pay-box .pay-id { font-size: 20px; font-weight: 800; word-break: break-all; }
+    .pay-box.ok { background: #E3F4EA; color: #14633B; }
+    .pay-box.warn { background: #FFF4DB; color: var(--warn); }
+    .pay-box .place-order-button { margin-top: 12px; }
+    .order-card-pay { font-size: 15px; font-weight: 600; margin: 0 0 8px; }
+    .order-card-pay.paid { color: var(--ok); }
+    .order-card-pay.unpaid { color: var(--warn); }
+    .order-card-paynote { color: var(--muted); font-size: 15px; margin: -4px 0 8px; }
     .whatsapp-btn { display: block; text-align: center; background: #25D366; color: #fff; padding: 15px; border-radius: var(--r-ctl); font-weight: 700; font-size: 18px; text-decoration: none; margin-top: 20px; line-height: 1.35; }
     .whatsapp-btn .wa-sub { font-size: 21px; }
 
@@ -603,6 +617,16 @@
           <div class="form-group"><label for="deliveryNotes">Delivery Notes</label>
             <textarea id="deliveryNotes" maxlength="500" placeholder="Optional delivery instructions"></textarea></div>
 
+          <div class="form-group" id="payMethodGroup" role="radiogroup" aria-labelledby="payMethodLabel">
+            <label id="payMethodLabel">Payment Method <span class="required">*</span></label>
+            <label class="check-row pay-option" for="payCard" id="payCardRow">
+              <input type="radio" name="payMethod" id="payCard" value="Card" checked>
+              <span><strong>Pay by card</strong><small>You will pay on Stripe's secure payment page right after you place the order.</small></span></label>
+            <label class="check-row pay-option" for="payZelle" id="payZelleRow">
+              <input type="radio" name="payMethod" id="payZelle" value="Zelle">
+              <span><strong>Pay with Zelle</strong><small>We show our Zelle details after you place the order. We process your order once your payment arrives.</small></span></label>
+          </div>
+
           <div class="order-summary">
             <h3>Order Summary</h3>
             <div id="checkoutItems"></div>
@@ -621,12 +645,13 @@
       <!-- Success -->
       <div id="pSuccess" hidden>
         <div class="order-success">
-          <h2>Order Submitted!</h2>
+          <h2 id="successTitle">Order Submitted!</h2>
           <div>Your order number is:</div>
           <div id="orderNumber" class="order-number"></div>
-          <div class="success-note">
+          <div class="success-note" id="successNote">
             Thank you! Your order has been placed successfully.
           </div>
+          <div id="payBox" class="pay-box" hidden></div>
           <div id="waBox" hidden>
             <a id="whatsappBtn" class="whatsapp-btn" href="#" target="_blank" rel="noopener">Click here to track your order on WhatsApp</a>
             <div class="order-note">This opens WhatsApp with your order details.</div>
@@ -697,7 +722,7 @@
   // Reading data is safe to repeat. Google sometimes answers a request with an error page for a few seconds
   // (busy, waking up, a limit); the browser reports that as a "CORS" or network error. So read-only requests
   // are quietly retried. Placing an order or changing an account is NEVER retried, so nothing can happen twice.
-  const SAFE_TO_RETRY = { getShopData: 1, getMyOrders: 1 };
+  const SAFE_TO_RETRY = { getShopData: 1, getMyOrders: 1, confirmCardPayment: 1 };
   const RETRY_WAITS = [1200, 3000, 6000];
 
   function call(name, args, ok, fail, attempt) {
@@ -749,9 +774,11 @@
   let checkoutIntent = false; // true when the customer came from the cart
   let busy = false;
   let pendingDetails = null;
+  let returnInfo = null;      // set when the customer comes back from Stripe (?stripe=success|cancel)
 
   const CART_KEY = 'ld_cart';
   const USER_KEY = 'ld_user';
+  const PENDING_KEY = 'ld_pending';   // the order being paid on Stripe, kept so the receipt can be shown on return
 
   /* ===========================================================
      SMALL HELPERS
@@ -903,6 +930,7 @@
     updateCart();
     renderAccountButton();
     if (!$('pOrder').hidden) updateCheckout();
+    if (returnInfo) { const r = returnInfo; returnInfo = null; handleStripeReturn(r); }
   }
 
   /** Paid delivery steps from the server settings, highest order range first. */
@@ -979,6 +1007,15 @@
       sel.appendChild(o);
     });
     sel.value = current;
+
+    // Only offer the payment methods that are switched on (card needs the Stripe key; Zelle needs a Zelle address)
+    const cardOn = config.cardEnabled !== false;
+    const zelleOn = config.zelleId === undefined || !!config.zelleId;
+    $('payCardRow').hidden = !cardOn;
+    $('payZelleRow').hidden = !zelleOn;
+    if (!cardOn && zelleOn) $('payZelle').checked = true;
+    if (cardOn && !zelleOn) $('payCard').checked = true;
+    if (!cardOn && !zelleOn) $('payMethodGroup').hidden = true;
 
     $('regPassword').placeholder = 'At least ' + config.minPasswordLength + ' characters';
     $('resetPassword').placeholder = 'At least ' + config.minPasswordLength + ' characters';
@@ -1550,6 +1587,21 @@
       card.appendChild(head);
 
       card.appendChild(el('div', 'order-card-date', o.date));
+      if (o.paymentStatus) {
+        const paid = /^paid$/i.test(o.paymentStatus);
+        card.appendChild(el('div', 'order-card-pay ' + (paid ? 'paid' : 'unpaid'),
+          'Payment: ' + (o.paymentMethod || '') + ' - ' + (paid ? 'Paid' : 'Awaiting payment')));
+        if (!paid && o.paymentMethod === 'Zelle' && config && config.zelleId) {
+          card.appendChild(el('div', 'order-card-paynote',
+            'Send ' + money(o.total) + ' with Zelle to ' + config.zelleId + ' and put ' + o.orderNumber + ' in the memo.'));
+        }
+        if (!paid && o.paymentMethod === 'Card' && !/^cancel/i.test(o.status)) {
+          const pay = el('button', 'retry-btn', 'Pay by card now');
+          pay.type = 'button';
+          pay.addEventListener('click', () => startCardPayment({ orderNumber: o.orderNumber, token: user && user.token }, pay));
+          card.appendChild(pay);
+        }
+      }
       card.appendChild(el('div', 'order-card-items', o.items));
       card.appendChild(el('div', 'order-card-addr',
         'Deliver to: ' + [o.address, o.city, config ? config.state : '', o.zip].filter(Boolean).join(', ')));
@@ -1743,7 +1795,8 @@
       address: $('address').value.trim(),
       city: $('city').value,
       zip: $('zip').value.replace(/\D/g, ''),
-      deliveryNotes: $('deliveryNotes').value.trim()
+      deliveryNotes: $('deliveryNotes').value.trim(),
+      paymentMethod: (document.querySelector('input[name="payMethod"]:checked') || {}).value || ''
     };
 
     function fail(msg, field) { setMsg('orderMsg', msg); if (field) $(field).focus(); }
@@ -1754,6 +1807,7 @@
     if (!d.city) return fail('Please select your city.', 'city');
     if (!/^\d{5}$/.test(d.zip)) return fail('Please enter a valid 5-digit ZIP code.', 'zip');
     if (!hasCart()) return fail('Your cart is empty.');
+    if (!d.paymentMethod) return fail('Please choose how you will pay.');
 
     setMsg('orderMsg', '');
     const lines = Object.keys(cart)
@@ -1770,7 +1824,7 @@
       .createOrder({
         customerName: d.customerName, phone: d.phone, email: d.email, whatsappUpdates: d.whatsappUpdates,
         address: d.address, city: d.city,
-        zip: d.zip, deliveryNotes: d.deliveryNotes, cart: lines,
+        zip: d.zip, deliveryNotes: d.deliveryNotes, cart: lines, paymentMethod: d.paymentMethod,
         expectedTotal: computeTotals().total,
         token: user && user.token ? user.token : ''
       });
@@ -1784,6 +1838,7 @@
     m += 'DELIVERY\n' + d.address + '\n' + d.city + ', ' + config.state + ' ' + d.zip + '\n';
     if (d.deliveryNotes) m += 'Notes: ' + d.deliveryNotes + '\n';
     m += '\nITEMS\n' + order.items + '\n\n';
+    if (order.paymentMethod) m += 'Payment: ' + order.paymentMethod + '\n';
     m += 'Subtotal: ' + money(order.subtotal) + '\n';
     (order.taxes || []).forEach(x => { m += x.label + ' (' + x.rate + '%): ' + money(x.amount) + '\n'; });
     m += 'Delivery: ' + (order.deliveryFee === 0 ? 'FREE' : money(order.deliveryFee)) + '\n';
@@ -1795,28 +1850,146 @@
     busy = false;
     setBusy($('placeOrderButton'), false);
 
-    const url = 'https://wa.me/' + config.whatsappNumber + '?text=' +
-      encodeURIComponent(buildWhatsAppMessage(order, pendingDetails));
-
-    // Show the reduced stock straight away (the server has already deducted it)
-    Object.keys(cart).forEach(sku => {
-      const p = productsBySku[sku];
-      if (p) p.quantity = Math.max(0, (Number(p.quantity) || 0) - cart[sku]);
-    });
-    filterProducts();
-
+    const details = pendingDetails;
+    // Stock is not reduced yet: it is taken off once the order is paid, so the product cards stay as they are.
     cart = {};
     saveCart();
     updateCart();
     $('orderForm').reset();
     prefillFromUser();
 
+    if (order.paymentMethod === 'Card' && order.checkoutUrl) {
+      // Keep what we need to show the receipt when Stripe sends the customer back
+      storeSet(PENDING_KEY, { order: order, details: details });
+      renderSuccess({ mode: 'redirect', order: order, details: details });
+      setTimeout(() => { window.location.assign(order.checkoutUrl); }, 400);
+    } else {
+      renderSuccess({ mode: 'zelle', order: order, details: details });
+    }
+    // WhatsApp only opens if the customer taps the button on the success screen.
+  }
+
+  /** Fills the success panel. mode: zelle | redirect | checking | paid | pending | cancel | error */
+  function renderSuccess(o) {
+    const order = o.order || { orderNumber: o.orderNumber, items: '', subtotal: 0, taxes: [], deliveryFee: 0, total: 0 };
+    const details = o.details || null;
+    const box = $('payBox');
+    clear(box);
+    box.className = 'pay-box';
+    box.hidden = false;
+
+    let title = 'Order Submitted!';
+    let note = 'Thank you! Your order has been placed successfully.';
+
+    if (o.mode === 'zelle') {
+      const id = order.zelleId || (config && config.zelleId) || '';
+      note = 'Thank you! Your order has been placed. Please send your Zelle payment below so we can process it.';
+      box.appendChild(el('h3', null, 'Pay with Zelle'));
+      box.appendChild(el('p', null, 'Send ' + money(order.total) + ' with Zelle to:'));
+      box.appendChild(el('p', 'pay-id', id));
+      const zn = order.zelleName || (config && config.zelleName) || '';
+      if (zn) box.appendChild(el('p', null, 'Name on the account: ' + zn));
+      box.appendChild(el('p', null, 'In the Zelle memo, write your order number: ' + order.orderNumber));
+      box.appendChild(el('p', null, 'We start processing your order as soon as we receive your payment.'));
+    } else if (o.mode === 'redirect') {
+      note = 'Taking you to our secure payment page...';
+      box.appendChild(el('h3', null, 'Pay by card'));
+      box.appendChild(el('p', null, 'You will pay on Stripe\'s secure page. Your order is processed once the payment is complete.'));
+      const b = el('button', 'place-order-button', 'Pay by card now');
+      b.type = 'button';
+      b.addEventListener('click', () => { window.location.assign(order.checkoutUrl); });
+      box.appendChild(b);
+    } else if (o.mode === 'checking') {
+      note = 'Thank you! We are confirming your payment...';
+      box.hidden = true;
+    } else if (o.mode === 'paid') {
+      note = 'Thank you! Your payment was received and your order has been placed successfully.';
+      box.className = 'pay-box ok';
+      box.appendChild(el('h3', null, 'Payment received'));
+      box.appendChild(el('p', null, 'We will start processing your order now.'));
+    } else if (o.mode === 'pending') {
+      note = 'Your order is saved.';
+      box.className = 'pay-box warn';
+      box.appendChild(el('h3', null, 'We are still confirming your payment'));
+      box.appendChild(el('p', null, 'This can take a few minutes. If you were charged, your order will be marked Paid automatically. You do not need to pay again.'));
+    } else if (o.mode === 'cancel') {
+      title = 'Payment Not Completed';
+      note = 'Your order is saved, but we cannot process it until it is paid.';
+      box.className = 'pay-box warn';
+      box.appendChild(el('h3', null, 'Pay by card'));
+      box.appendChild(el('p', null, 'Your card was not charged. You can try again now.'));
+      const email = details && details.email;
+      if (email) {
+        const b = el('button', 'place-order-button', 'Pay by card now');
+        b.type = 'button';
+        b.addEventListener('click', () => startCardPayment({ orderNumber: order.orderNumber, email: email }, b));
+        box.appendChild(b);
+      } else {
+        box.appendChild(el('p', null, 'To pay, log in and open My Orders, or contact us on WhatsApp with your order number.'));
+      }
+    } else if (o.mode === 'error') {
+      note = 'Your order is saved.';
+      box.className = 'pay-box warn';
+      box.appendChild(el('h3', null, 'We could not confirm your payment yet'));
+      box.appendChild(el('p', null, o.message || 'If you were charged, your order will be marked Paid automatically within a few minutes.'));
+    }
+
+    $('successTitle').textContent = title;
+    $('successNote').textContent = note;
     $('orderNumber').textContent = order.orderNumber;
-    $('whatsappBtn').href = url;
-    $('waBox').hidden = !pendingDetails.whatsappUpdates;
+
+    const showWa = !!(details && details.whatsappUpdates && order.items && config);
+    $('waBox').hidden = !showWa;
+    if (showWa) {
+      $('whatsappBtn').href = 'https://wa.me/' + config.whatsappNumber + '?text=' +
+        encodeURIComponent(buildWhatsAppMessage(order, details));
+    }
     $('viewOrdersBtn').hidden = !(user && user.token);
     showPanel('pSuccess', true);
-    // WhatsApp only opens if the customer taps the button on the success screen.
+  }
+
+  /** Gets a fresh Stripe payment page for an unpaid card order, then sends the customer there. */
+  function startCardPayment(data, btn) {
+    setBusy(btn, true, 'Opening payment page...');
+    google.script.run
+      .withSuccessHandler(res => { window.location.assign(res.checkoutUrl); })
+      .withFailureHandler(err => {
+        setBusy(btn, false);
+        toast(errText(err, 'Could not open the payment page. Please try again.'));
+      })
+      .retryCardPayment(data);
+  }
+
+  /** The customer is back from Stripe (the address ends ?stripe=success&order=...&session_id=... or ?stripe=cancel&order=...). */
+  function handleStripeReturn(r) {
+    const saved = storeGet(PENDING_KEY);
+    const mine = saved && saved.order && saved.order.orderNumber === r.order ? saved : null;
+    const base = mine ? { order: mine.order, details: mine.details } : { orderNumber: r.order };
+
+    if (r.kind === 'cancel') { renderSuccess(Object.assign({ mode: 'cancel' }, base)); return; }
+
+    renderSuccess(Object.assign({ mode: 'checking' }, base));
+    let attempt = 0;
+    function check() {
+      attempt += 1;
+      google.script.run
+        .withSuccessHandler(res => {
+          if (res && res.paid) {
+            storeRemove(PENDING_KEY);
+            renderSuccess(Object.assign({ mode: 'paid' }, base));
+          } else if (attempt < 4) {
+            setTimeout(check, 4000);
+          } else {
+            renderSuccess(Object.assign({ mode: 'pending' }, base));
+          }
+        })
+        .withFailureHandler(err => {
+          if (attempt < 4) { setTimeout(check, 4000); return; }
+          renderSuccess(Object.assign({ mode: 'error', message: errText(err, '') }, base));
+        })
+        .confirmCardPayment({ orderNumber: r.order, sessionId: r.sessionId });
+    }
+    check();
   }
 
   function orderFailed(err) {
@@ -1911,6 +2084,16 @@
      START
      =========================================================== */
   cart = loadCart();
+  (function () {
+    let q;
+    try { q = new URLSearchParams(window.location.search); } catch (e) { return; }
+    const kind = q.get('stripe'), order = String(q.get('order') || '');
+    if ((kind === 'success' || kind === 'cancel') && /^HM-\d+$/.test(order)) {
+      returnInfo = { kind: kind, order: order, sessionId: String(q.get('session_id') || '') };
+      if (kind === 'success' && !/^cs_(test|live)_[A-Za-z0-9]+$/.test(returnInfo.sessionId)) returnInfo = null;
+    }
+    if (kind) { try { history.replaceState(null, '', window.location.pathname); } catch (e) {} }   // tidy the address bar
+  })();
   const savedUser = storeGet(USER_KEY);
   if (savedUser && savedUser.email && savedUser.token) user = savedUser;
   else if (savedUser) storeRemove(USER_KEY); // older login without a session token: ask to log in again
