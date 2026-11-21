@@ -1530,9 +1530,21 @@
     renderAccountButton();
   }
 
+  /** Clears the checkout form (a radio reset would otherwise re-select a hidden payment option). */
+  function resetOrderForm() {
+    $('orderForm').reset();
+    if (config && config.cardEnabled === false && !$('payZelleRow').hidden) $('payZelle').checked = true;
+  }
+
   function logout() {
     user = null;
     storeRemove(USER_KEY);
+    // The next person on this device must not see this customer's cart or details
+    cart = {};
+    saveCart();
+    updateCart();
+    resetOrderForm();
+    checkoutIntent = false;
     renderAccountButton();
     showShop();
     toast('You have been logged out.');
@@ -1855,7 +1867,7 @@
     cart = {};
     saveCart();
     updateCart();
-    $('orderForm').reset();
+    resetOrderForm();
     prefillFromUser();
 
     if (order.paymentMethod === 'Card' && order.checkoutUrl) {
